@@ -1,0 +1,170 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Identity & RBAC ─────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  password      String
+  phone         String?
+  role          String    @default("STAFF") // SUPER_ADMIN, IT_ADMIN, BRANCH_MANAGER, STAFF, MAINTENANCE, OFFICE
+  branchId      String?
+  branch        Branch?   @relation("UserBranch", fields: [branchId], references: [id])
+  
+  ticketsFiled     Ticket[]    @relation("TicketOwner")
+  ticketsAssigned  Ticket[]    @relation("TicketAssignee")
+  comments         Comment[]
+  activityLogs     ActivityLog[]
+  notifications    Notification[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  location  String?
+  users     User[]   @relation("UserBranch")
+  tickets   Ticket[]
+  assets    Asset[]
+  createdAt DateTime @default(now())
+}
+
+// ─── Asset Management ─────────────────────────────────────────
+
+model Category {
+  id      String   @id @default(cuid())
+  name    String   @unique   // EPOS, Sound, Lighting, CCTV, WiFi, HVAC, Other
+  assets  Asset[]
+  tickets Ticket[]
+}
+
+model Asset {
+  id         String   @id @default(cuid())
+  name       String
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  location   String?  // Main Bar, VIP, DJ Booth, etc
+  tickets    Ticket[]
+  createdAt  DateTime @default(now())
+}
+
+// ─── Ticket Engine ────────────────────────────────────────────
+
+model Ticket {
+  id            String   @id @default(cuid())
+  ticketNumber  String   @unique  // INC-0001 or MAT-0001
+  title         String
+  description   String
+  type          String   // IT_INCIDENT, MATERIAL_REQUEST
+  status        String   @default("NEW") // NEW, UNDER_REVIEW, ASSIGNED, IN_PROGRESS, WAITING_BRANCH, WAITING_PARTS, RESOLVED, CLOSED
+  urgency       String   @default("NORMAL") // LOW, NORMAL, HIGH, CRITICAL
+
+  branchId      String
+  branch        Branch   @relation(fields: [branchId], references: [id])
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  assetId       String?
+  asset         Asset?   @relation(fields: [assetId], references: [id])
+  
+  ownerId       String
+  owner         User     @relation("TicketOwner", fields: [ownerId], references: [id])
+  assigneeId    String?
+  assignee      User?    @relation("TicketAssignee", fields: [assigneeId], references: [id])
+
+  internalNotes String?
+  issueLocation String?  // Exact location in-branch e.g. "DJ Booth L2"
+  issueStarted  DateTime?
+  
+  parentId      String?
+  parent        Ticket?  @relation("LinkedTickets", fields: [parentId], references: [id])
+  children      Ticket[] @relation("LinkedTickets")
+  
+  attachments   Attachment[]
+  comments      Comment[]
+  materialItems MaterialItem[]
+  activityLogs  ActivityLog[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ─── Material Procurement ─────────────────────────────────────
+
+model MaterialItem {
+  id                String   @id @default(cuid())
+  ticketId          String
+  ticket            Ticket   @relation(fields: [ticketId], references: [id])
+  itemName          String
+  description       String?
+  quantity          Float
+  unit              String   @default("pcs")  // pcs, meters, liters, boxes, rolls, sets
+  estimatedCost     Float?
+  preferredVendor   String?
+  procurementStatus String   @default("SUBMITTED") // SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED, FOR_PURCHASE, PURCHASED, DELIVERED, COMPLETED, CANCELLED
+  neededBy          DateTime?
+  reason            String?
+  reviewComment     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// ─── Communication ────────────────────────────────────────────
+
+model Comment {
+  id         String   @id @default(cuid())
+  content    String
+  isInternal Boolean  @default(false)
+  ticketId   String
+  ticket     Ticket   @relation(fields: [ticketId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  filename  String
+  url       String
+  mimeType  String?
+  size      Int?
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// ─── Audit & Notifications ────────────────────────────────────
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String   // STATUS_CHANGE, ASSIGNED, COMMENT_ADDED, MATERIAL_CREATED, etc.
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
